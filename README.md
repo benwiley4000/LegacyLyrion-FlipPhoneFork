@@ -8,6 +8,7 @@ I want to make a few changes, some destined for contributing to LegacyLyrion ups
 
 #### To be offered upstream
 
+- Implement gapless playback
 - Make UI scale more granular (allowing 5% increments)
 - Make all UI accessible via D-Pad navigation. There are currently some issues, such as:
   - Some items can't be focused via D-Pad navigation (now playing icon in top bar, menu icon in top bar, some buttons on album page)
