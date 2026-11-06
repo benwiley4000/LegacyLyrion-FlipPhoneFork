@@ -1,3 +1,29 @@
+## LegacyLyrion-FlipPhoneFork
+
+### What's this fork and why?
+
+The goal of this fork is to optimize the LegacyLyrion Android app for use on an Android-based keypad phone, like my ZTE Cymbal 2, which a classic phone keypad, no touch screen, and a 240x320px display. Because it's a phone, I want to be able to access my server from outside my home network, which means using https, using auth, and using a secure player mechanism other than SlimProto.
+
+I want to make a few changes, some destined for contributing to LegacyLyrion upstream, some of which will stay in my fork for now, because they're not particularly relevant to the general intended use case of the original author.
+
+#### To be offered upstream
+
+- Make UI scale more granular (allowing 5% increments)
+- Make all UI accessible via D-Pad navigation. There are currently some issues, such as:
+  - Some items can't be focused via D-Pad navigation (now playing icon in top bar, menu icon in top bar, some buttons on album page)
+  - Occasionally, something prevents interaction with page items (settings view, initial server setup view)
+  - Some UI panes like equalizer show up with swipe but no other obvious interaction
+
+#### For just this fork (for now)
+
+- Reduce footprint of searchbar relative to the rest of the page content
+- Support http/https addresses instead of just IP addresses for servers
+- Support targeting LyrionJS plugin backend for audio streaming to avoid the SlimProto port being publicly exposed
+- Save list of prevously contacted servers and their configuration (like username+password, lyrionjs backend vs slim proto) to avoid having to retype information when changing server
+
+
+# ORIGINAL README
+
 <p align="center"><img src="art/legacylyrion_512.png" width="160" alt="LegacyLyrion icon"></p>
 
 # LegacyLyrion
