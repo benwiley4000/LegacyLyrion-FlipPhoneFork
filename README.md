@@ -10,6 +10,8 @@ I want to make a few changes, some destined for contributing to LegacyLyrion ups
 
 - Implement gapless playback
 - Make UI scale more granular (allowing 5% increments)
+- Display current track playing in Android system notification and in current media status (to be shown on lock screen)
+- Display track progress as part of bottom bar
 - Make all UI accessible via D-Pad navigation. There are currently some issues, such as:
   - Some items can't be focused via D-Pad navigation (now playing icon in top bar, menu icon in top bar, some buttons on album page)
   - Occasionally, something prevents interaction with page items (settings view, initial server setup view)
