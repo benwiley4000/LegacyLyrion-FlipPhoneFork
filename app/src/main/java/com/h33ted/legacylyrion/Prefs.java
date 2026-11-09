@@ -57,6 +57,11 @@ final class Prefs {
         return isUrl(host(c));
     }
 
+    /** Changes whenever the way the phone player connects does, so the service knows to reconnect. */
+    static String linkKey(Context c) {
+        return useBridge(c) ? "bridge " + withProtocol(hostPort(c)) : "direct";
+    }
+
     static boolean isUrl(String host) { return host != null && host.contains("://"); }
 
     /** "http://" is assumed when the address has no protocol; a trailing slash is dropped. */

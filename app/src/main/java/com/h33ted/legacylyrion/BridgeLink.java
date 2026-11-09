@@ -19,10 +19,18 @@ import java.util.List;
  * hold is resumed, with what LMS sent meanwhile replayed and what the player sent into the dead socket
  * sent again, so a phone changing networks does not look like a player leaving.
  */
-final class BridgeLink {
+final class BridgeLink implements PlayerLink {
     interface Listener {
         /** The same session carries on after a dropout (LMS never saw us leave). */
         void resumed();
+    }
+
+    /**
+     * The LyrionJS plugin only lets players with its MAC prefix (02:4c:4a) through its WebSocket, so
+     * through the bridge the phone is the same device under that prefix: its own last three bytes.
+     */
+    static String mac(String direct) {
+        return "02:4c:4a" + direct.substring(8);
     }
 
     /** Close codes after which the session is over and resuming is pointless (the plugin's, see its docs). */
@@ -76,8 +84,9 @@ final class BridgeLink {
         return wsUrl;
     }
 
-    /** Connects and starts a new session; returns when LMS's side is ready for the player's HELO. */
-    void open() throws IOException {
+    /** Connects and starts a new session; returns (the stream LMS's frames arrive on) when LMS's side is ready for the player's HELO. */
+    @Override
+    public InputStream open() throws IOException {
         WsClient w = WsClient.connect(wsUrl, Auth.header(address), CONNECT_MS);
         try {
             w.sendText("{\"hello\":1}");
@@ -98,6 +107,23 @@ final class BridgeLink {
             w.abort();
             throw e;
         }
+        return in();
+    }
+
+    /** Audio comes from the same address as everything else: LMS streams to a LyrionJS player itself, radio included. */
+    @Override
+    public String streamBase() {
+        return address;
+    }
+
+    @Override
+    public Failure failure(Exception e) {
+        int code = e instanceof WsClient.Closed ? ((WsClient.Closed) e).code : 0;
+        if (e instanceof Auth.Required) return new Failure("THE SERVER NEEDS A LOGIN: SET IT UNDER SERVER LOGIN", 15000);
+        if (code == REPLACED) return new Failure("ANOTHER SESSION TOOK THIS PLAYER", 30000);
+        if (code == DISABLED) return new Failure("BROWSER PLAYERS ARE SWITCHED OFF IN THE LYRIONJS SETTINGS", 30000);
+        if (String.valueOf(e.getMessage()).startsWith("HTTP 404")) return new Failure("THE LYRIONJS PLUGIN WAS NOT FOUND ON THE SERVER", 15000);
+        return new Failure("BRIDGE RECONNECTING...", 3500);
     }
 
     /** What LMS sends, as a byte stream. A dropout within the hold is resumed inside read(). */
@@ -129,7 +155,8 @@ final class BridgeLink {
     }
 
     /** The frames the player sends: bytes are gathered until flush(), which sends them as one frame. */
-    OutputStream out() {
+    @Override
+    public OutputStream out() {
         return new OutputStream() {
             private final ByteArrayOutputStream buf = new ByteArrayOutputStream();
 
@@ -154,7 +181,8 @@ final class BridgeLink {
     }
 
     /** Says goodbye (so LMS drops the player now rather than after the hold) and closes. */
-    void close() {
+    @Override
+    public void close() {
         if (closed) return;
         closed = true;
         WsClient w;
