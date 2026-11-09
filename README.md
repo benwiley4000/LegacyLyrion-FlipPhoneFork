@@ -17,6 +17,7 @@ Built for giving phones from the 2011 to 2014 era a second life as music players
 - **Native look on each skin.** Uses the maker's own theme where it has one: HTC Sense 5 (dark by default, light optional, with HTC's action bar, text fields and section bars), LG Optimus UI, Sony Xperia (the carbon background, Sony's section headers and the accent colour of the phone's chosen theme, with a Now Playing screen in the style of the Walkman player), and Samsung and other skins through Android's device theme. Plain Holo light and dark can be picked on any phone, and Material light and dark on Android 5.0 and newer.
 - **UI size.** *Settings > Size* draws the whole app smaller or larger (60 to 125%), like changing the phone's DPI for this app only; handy on 240x320 flip phones.
 - **Password-protected servers.** If the server (Lyrion's own password protection, or a proxy in front of it) asks for a login, the app asks for a username and password once and sends them with every request to that server (HTTP Basic). They are stored on the phone only; ⋮ > *Server login* changes or removes them.
+- **Away from home, over https.** With the [LyrionJS](https://github.com/JameZUK/LyrionJS) plugin on the server, the phone can be a player through Lyrion's normal web port, so a single https port through a reverse proxy is enough (see *Using it away from home*).
 - **First-run setup** finds your Lyrion server on the Wi-Fi automatically, or takes an address by hand, then checks which music plugins the server has: with none it starts in your library, with one it starts there, and with both Spotty and YouTube Music it asks which should be the main source.
 - **Updates itself** from this repository's GitHub releases (Android 4.1 and newer; see below).
 
@@ -42,6 +43,29 @@ The app checks this repository's latest release once a day (and from *Check for 
 
 GitHub requires TLS 1.2. Android 4.1 to 4.3 have it but leave it switched off, so the updater turns it on. **Android 4.0 cannot reach GitHub at all**; update those phones by downloading the APK from another device or a computer.
 
+## Using it away from home
+
+Browsing, control and a login already work through a reverse proxy: type the address with its protocol in the server field (`https://music.example.com`) and the port in the port field (for example `9100`; leave it empty or `443` for the standard one). To also play on the phone from outside, without exposing Lyrion's player port (3483):
+
+1. Install the **LyrionJS** plugin on the server. It lets a player connect through a WebSocket on the web port.
+2. In the app, *Settings > Phone player connection* picks how the phone connects: *SlimProto (port 3483)* is the default for a plain address, *LyrionJS bridge (web port)* needs only the one http/https port, and *Automatic* (the default) uses the bridge for an address typed with a protocol.
+3. Your reverse proxy must pass WebSocket upgrades to Lyrion. For nginx:
+
+```
+location / {
+    proxy_pass http://127.0.0.1:9000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 120s;
+}
+```
+
+Through the bridge the phone shows up in Lyrion as a separate player (its ID starts with `02:4c:4a`, the prefix LyrionJS reserves), and the audio comes from the same address. If the connection drops for a few seconds (a phone changing networks) it is resumed without Lyrion noticing. If Lyrion has a password, the same login is used.
+
+Limits: https needs TLS 1.2, which Android 4.1 to 4.3 have but leave off (the app switches it on) and Android 4.0 does not have, so those phones keep using the plain connection. Phones older than Android 7.1 may not trust certificates from Let's Encrypt, whose root they lack; use a certificate from another authority or install that root on the phone.
+
 ## Building
 
 The project is a plain Gradle project (Android Gradle Plugin 4.2.2, Gradle 6.9, JDK 8, SDK 28, no dependencies).
@@ -55,7 +79,7 @@ Releases are built by GitHub Actions: pushing a tag like `v1.1.0` builds an APK 
 ## How it works
 
 - **Browsing and control** use Lyrion's JSON-RPC API (`/jsonrpc.js`). Spotify and YouTube Music browsing go through the plugins' Squeezebox-controller (Jive) menus, the same ones a Squeezebox Touch uses, so both share one code path.
-- **Playback on the phone** is a small SlimProto client (TCP port 3483) that streams MP3 from Lyrion into Android's `MediaPlayer`.
+- **Playback on the phone** is a small SlimProto client (TCP port 3483) that streams MP3 from Lyrion into Android's `MediaPlayer`. Through the LyrionJS bridge the same client talks SlimProto over a WebSocket (`/plugins/LyrionJS/ws`, `WsClient` and `BridgeLink`) and streams from the web port.
 - **Skins:** most makers restyle Android's `Theme.DeviceDefault`, so the app just uses it. HTC Sense and LG keep their looks in their own resource packages (`com.htc`, `com.lge.internal`); the app detects and loads those at runtime, and reaches HTC's widget classes by reflection, so one APK runs everywhere.
 - **Icons** are SVG files in `res/raw`, drawn by a small built-in SVG path renderer (Android 4.x has no vector drawables), so they stay sharp at every screen density.
 
