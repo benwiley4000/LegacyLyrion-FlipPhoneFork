@@ -42,7 +42,6 @@ public class SlimProtoService extends Service {
     private static final String PREFS = "slimproto";
 
     public static final StringBuffer LOG = new StringBuffer();
-    private volatile boolean startedSent = false;
     public static volatile int audioSessionId = 0;
 
     public static void log(String m) {
@@ -61,8 +60,7 @@ public class SlimProtoService extends Service {
     private volatile DataOutputStream outStream;
     private Thread protoThread;
 
-    private volatile MediaPlayer mediaPlayer;
-    private volatile float currentGain = 1.0f;
+    private final Playback playback = new Playback(new PlaybackHost());
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService statExec = Executors.newSingleThreadExecutor();
     private WifiManager.WifiLock wifiLock;
@@ -126,7 +124,7 @@ public class SlimProtoService extends Service {
         if (notifier != null) notifier.stop();
         generation++;
         closeSocket();
-        stopAndReleaseMediaPlayer();
+        playback.releaseAll();
         statExec.shutdownNow();
         try {
             if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
@@ -316,13 +314,7 @@ public class SlimProtoService extends Service {
     private void sendStatPacket(String eventCode, int serverTimestamp) {
         if (outStream == null) return;
         try {
-            int elapsedMs = 0;
-            MediaPlayer mp = mediaPlayer;
-            if (mp != null) {
-                try {
-                    if (mp.isPlaying()) elapsedMs = mp.getCurrentPosition();
-                } catch (Exception ignored) {}
-            }
+            int elapsedMs = playback.elapsedMs();
 
             ByteArrayOutputStream body = new ByteArrayOutputStream(53);
             DataOutputStream d = new DataOutputStream(body);
@@ -391,16 +383,11 @@ public class SlimProtoService extends Service {
                     | ((p[2] & 0xFF) << 8) | (p[3] & 0xFF);
             vol = oldLeft / 128.0f;
         }
-        currentGain = Math.min(1.0f, Math.max(0.0f, vol));
+        final float gain = Math.min(1.0f, Math.max(0.0f, vol));
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
-                MediaPlayer mp = mediaPlayer;
-                if (mp != null) {
-                    try {
-                        mp.setVolume(currentGain, currentGain);
-                    } catch (Exception ignored) {}
-                }
+                playback.volume(gain);
             }
         });
     }
@@ -441,38 +428,20 @@ public class SlimProtoService extends Service {
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
-                MediaPlayer mp = mediaPlayer;
                 switch (subCmd) {
                     case 's':
                         startStreamFromHttpHeader(requestString, ipFromServer, serverPort,
                                 autostart == '1' || autostart == '3');
                         break;
                     case 'p':
-                        if (mp != null) {
-                            try {
-                                if (mp.isPlaying()) mp.pause();
-                            } catch (Exception ignored) {}
-                            sendBackgroundStat("STMp", 0);
-                            broadcastState("SLIMPROTO PAUSED");
-                        }
+                        playback.pause();
                         break;
                     case 'u':
-                        if (mp != null) {
-                            try {
-                                mp.start();
-                            } catch (Exception ignored) {}
-                            sendBackgroundStat("STMr", 0);
-                            if (!startedSent) {
-                                startedSent = true;
-                                sendBackgroundStat("STMs", 0);
-                            }
-                            broadcastState("SLIMPROTO STREAMING AUDIO");
-                        }
+                        playback.unpause();
                         break;
                     case 'q':
                     case 'f':
-                        stopAndReleaseMediaPlayer();
-                        sendBackgroundStat("STMf", 0);
+                        playback.flush();
                         break;
                     default:
                         sendBackgroundStat("STMt", 0);
@@ -499,86 +468,8 @@ public class SlimProtoService extends Service {
         final String linkBase = l != null && ipFromServer == null ? l.streamBase() : null;
         final String streamUrl = linkBase != null ? linkBase + path : "http://" + host + ":" + targetPort + path;
 
-        stopAndReleaseMediaPlayer();
-        startedSent = false;
-        log("stream URL " + streamUrl);
-        sendBackgroundStat("STMc", 0);
-        broadcastState("SLIMPROTO BUFFERING STREAM...");
-
-        final boolean[] prepared = new boolean[1];
-        try {
-            MediaPlayer mp = new MediaPlayer();
-            mediaPlayer = mp;
-            openEffectSession(mp);
-            mp.setAudioStreamType(AudioManager.STREAM_MUSIC);
-            mp.setWakeMode(getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
-            mp.setVolume(currentGain, currentGain);
-            String login = Auth.header(linkBase != null ? linkBase : host + ":" + targetPort);
-            if (login != null) {   // password-protected server: the stream needs the login too
-                java.util.Map<String, String> headers = new java.util.HashMap<String, String>();
-                headers.put("Authorization", login);
-                mp.setDataSource(this, android.net.Uri.parse(streamUrl), headers);
-            } else {
-                mp.setDataSource(streamUrl);
-            }
-
-            mp.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
-                @Override
-                public void onPrepared(MediaPlayer m) {
-                    prepared[0] = true;
-                    log("prepared, autostart=" + autoStart);
-                    sendBackgroundStat("STMh", 0);
-                    sendBackgroundStat("STMl", 0);
-                    if (autoStart) {
-                        m.start();
-                        startedSent = true;
-                        sendBackgroundStat("STMs", 0);
-                        broadcastState("SLIMPROTO STREAMING AUDIO");
-                    } else {
-                        broadcastState("SLIMPROTO BUFFERED, WAITING");
-                    }
-                }
-            });
-
-            mp.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
-                @Override
-                public void onCompletion(MediaPlayer m) {
-                    log("playback completed");
-                    sendBackgroundStat("STMd", 0);
-                    sendBackgroundStat("STMu", 0);
-                }
-            });
-
-            mp.setOnErrorListener(new MediaPlayer.OnErrorListener() {
-                @Override
-                public boolean onError(MediaPlayer m, int what, int extra) {
-                    log("MediaPlayer error what=" + what + " extra=" + extra);
-                    sendBackgroundStat("STMn", 0);
-                    broadcastState("SLIMPROTO DECODER ERROR (" + what + ")");
-                    return true;
-                }
-            });
-
-            mp.setOnInfoListener(new MediaPlayer.OnInfoListener() {
-                @Override
-                public boolean onInfo(MediaPlayer m, int what, int extra) {
-                    log("MediaPlayer info " + what + "/" + extra);
-                    return false;
-                }
-            });
-            final MediaPlayer watched = mp;
-            mainHandler.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    if (mediaPlayer == watched && !prepared[0]) log("still not prepared after 12 s");
-                }
-            }, 12000);
-            mp.prepareAsync();
-        } catch (Exception e) {
-            log("stream setup failed: " + e);
-            sendBackgroundStat("STMn", 0);
-            broadcastState("SLIMPROTO STREAM ERROR");
-        }
+        String login = Auth.header(linkBase != null ? linkBase : host + ":" + targetPort);   // a password-protected server wants it on the stream too
+        playback.start(streamUrl, login, autoStart);
     }
 
     /** Network writes must stay off the main thread; a single executor keeps them ordered. */
@@ -593,17 +484,174 @@ public class SlimProtoService extends Service {
         } catch (Exception ignored) {}
     }
 
-    private void stopAndReleaseMediaPlayer() {
-        MediaPlayer mp = mediaPlayer;
-        mediaPlayer = null;
-        if (mp != null) {
-            closeEffectSession();
+    /** A MediaPlayer, as Playback sees a stream. Its calls never throw: a player in a bad state is as good as gone. */
+    private static final class MpStream implements Playback.Stream {
+        final MediaPlayer mp;
+
+        MpStream(MediaPlayer mp) {
+            this.mp = mp;
+        }
+
+        @Override
+        public void start() {
+            try {
+                mp.start();
+            } catch (Exception ignored) {}
+        }
+
+        @Override
+        public void pause() {
+            try {
+                mp.pause();
+            } catch (Exception ignored) {}
+        }
+
+        @Override
+        public boolean isPlaying() {
+            try {
+                return mp.isPlaying();
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
+        @Override
+        public void setVolume(float v) {
+            try {
+                mp.setVolume(v, v);
+            } catch (Exception ignored) {}
+        }
+
+        @Override
+        public int position() {
+            try {
+                return mp.getCurrentPosition();
+            } catch (Exception e) {
+                return -1;
+            }
+        }
+
+        @Override
+        public int duration() {
+            try {
+                return mp.getDuration();
+            } catch (Exception e) {
+                return -1;
+            }
+        }
+
+        @Override
+        public void release() {
             try {
                 if (mp.isPlaying()) mp.stop();
             } catch (Exception ignored) {}
             try {
                 mp.release();
             } catch (Exception ignored) {}
+        }
+    }
+
+    /** What Playback needs from Android. */
+    private final class PlaybackHost implements Playback.Host {
+        @Override
+        public Playback.Stream open(String streamUrl, String login, boolean next, float gain) throws Exception {
+            MediaPlayer mp = new MediaPlayer();
+            final MpStream stream = new MpStream(mp);
+            try {
+                if (!next) {
+                    openEffectSession(mp);
+                } else if (audioSessionId != 0) {
+                    mp.setAudioSessionId(audioSessionId);   // the next track keeps the same session, so effects carry on
+                }
+                mp.setAudioStreamType(AudioManager.STREAM_MUSIC);
+                mp.setWakeMode(getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
+                mp.setVolume(gain, gain);
+                if (login != null) {   // password-protected server: the stream needs the login too
+                    java.util.Map<String, String> headers = new java.util.HashMap<String, String>();
+                    headers.put("Authorization", login);
+                    mp.setDataSource(SlimProtoService.this, android.net.Uri.parse(streamUrl), headers);
+                } else {
+                    mp.setDataSource(streamUrl);
+                }
+
+                mp.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                    @Override
+                    public void onPrepared(MediaPlayer m) {
+                        playback.prepared(stream);
+                    }
+                });
+                mp.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+                    @Override
+                    public void onCompletion(MediaPlayer m) {
+                        playback.completed(stream);
+                    }
+                });
+                mp.setOnErrorListener(new MediaPlayer.OnErrorListener() {
+                    @Override
+                    public boolean onError(MediaPlayer m, int what, int extra) {
+                        playback.failed(stream, what, extra);
+                        return true;
+                    }
+                });
+                mp.setOnInfoListener(new MediaPlayer.OnInfoListener() {
+                    @Override
+                    public boolean onInfo(MediaPlayer m, int what, int extra) {
+                        log("MediaPlayer info " + what + "/" + extra);
+                        return false;
+                    }
+                });
+                mp.prepareAsync();
+            } catch (Exception e) {
+                stream.release();
+                throw e;
+            }
+            return stream;
+        }
+
+        @Override
+        public void chain(Playback.Stream current, Playback.Stream next) {
+            if (Build.VERSION.SDK_INT < 16) return;   // no setNextMediaPlayer: the next track starts when this one ends
+            try {
+                ((MpStream) current).mp.setNextMediaPlayer(((MpStream) next).mp);
+                log("gapless: next player chained");
+            } catch (Exception e) {
+                log("gapless: chaining failed: " + e);
+            }
+        }
+
+        @Override
+        public void idle() {
+            closeEffectSession();
+        }
+
+        @Override
+        public void stat(String code) {
+            sendBackgroundStat(code, 0);
+        }
+
+        @Override
+        public void status(String text) {
+            broadcastState(text);
+        }
+
+        @Override
+        public void log(String text) {
+            SlimProtoService.log(text);
+        }
+
+        @Override
+        public long now() {
+            return System.currentTimeMillis();
+        }
+
+        @Override
+        public void later(Runnable r, long delayMs) {
+            mainHandler.postDelayed(r, delayMs);
+        }
+
+        @Override
+        public void cancelLater(Runnable r) {
+            mainHandler.removeCallbacks(r);
         }
     }
 
