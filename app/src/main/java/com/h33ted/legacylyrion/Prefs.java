@@ -33,12 +33,54 @@ final class Prefs {
 
     static String player(Context c) {
         String id = get(c).getString("player_id", null);
-        if (id == null || SlimProtoService.LEGACY_SHARED_MAC.equalsIgnoreCase(id)) return SlimProtoService.localMac(c);
+        if (id == null || SlimProtoService.LEGACY_SHARED_MAC.equalsIgnoreCase(id) || SlimProtoService.isOwnMac(c, id)) {
+            return SlimProtoService.localMac(c);   // this phone, whichever way it connects
+        }
         return id;
     }
 
     /** Whether this phone also registers itself as a Lyrion player (SlimProto). */
     static boolean phonePlayer(Context c) { return get(c).getBoolean("phone_player", true); }
+
+    /**
+     * How the phone connects as a player: "direct" (its own SlimProto client, server port 3483), "bridge"
+     * (the LyrionJS plugin's WebSocket on the web port, so one http/https port is enough) or "auto":
+     * direct for a plain address, bridge for one typed with a protocol (https://...), which means the
+     * server is behind a web proxy and port 3483 is not reachable.
+     */
+    static String playerLink(Context c) { return get(c).getString("player_link", "auto"); }
+
+    static boolean useBridge(Context c) {
+        String mode = playerLink(c);
+        if (mode.equals("bridge")) return true;
+        if (mode.equals("direct")) return false;
+        return isUrl(host(c));
+    }
+
+    static boolean isUrl(String host) { return host != null && host.contains("://"); }
+
+    /** "http://" is assumed when the address has no protocol; a trailing slash is dropped. */
+    static String withProtocol(String address) {
+        String a = address == null ? "" : address.trim();
+        while (a.endsWith("/")) a = a.substring(0, a.length() - 1);
+        return a.contains("://") ? a : "http://" + a;
+    }
+
+    /** The host name alone: no protocol, login, port or path. For raw TCP connections. */
+    static String bareHost(String host) {
+        String h = host == null ? "" : host.trim();
+        int proto = h.indexOf("://");
+        if (proto >= 0) h = h.substring(proto + 3);
+        int slash = h.indexOf('/');
+        if (slash >= 0) h = h.substring(0, slash);
+        h = h.substring(h.lastIndexOf('@') + 1);
+        if (h.startsWith("[")) {   // IPv6 literal: [::1] or [::1]:9100
+            int end = h.indexOf(']');
+            return end > 0 ? h.substring(1, end) : h;
+        }
+        int colon = h.indexOf(':');
+        return colon >= 0 && colon == h.lastIndexOf(':') ? h.substring(0, colon) : h;   // host:port -> host
+    }
 
     static boolean setupDone(Context c) { return get(c).getBoolean("setup_done", false) || get(c).contains("lms_host"); }
 

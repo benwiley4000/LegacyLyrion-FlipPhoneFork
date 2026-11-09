@@ -15,7 +15,7 @@ import java.net.URL;
 public class LyrionRpcClient {
 
     public static JSONObject sendCommand(String serverHostPort, String playerId, JSONArray commandArray) throws Exception {
-        URL url = new URL("http://" + serverHostPort + "/jsonrpc.js");
+        URL url = new URL((serverHostPort.contains("://") ? "" : "http://") + serverHostPort + "/jsonrpc.js");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setConnectTimeout(4500);
         conn.setReadTimeout(6000);
@@ -58,7 +58,7 @@ public class LyrionRpcClient {
             if (artworkUrl != null && artworkUrl.startsWith("http")) {
                 fullUrl = artworkUrl;
             } else if (trackId != null && trackId.length() > 0 && !"0".equals(trackId)) {
-                fullUrl = "http://" + serverHostPort + "/music/" + trackId + "/cover_300x300.jpg";
+                fullUrl = (serverHostPort.contains("://") ? "" : "http://") + serverHostPort + "/music/" + trackId + "/cover_300x300.jpg";
             } else {
                 return null;
             }

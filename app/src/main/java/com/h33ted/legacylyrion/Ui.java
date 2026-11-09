@@ -77,7 +77,7 @@ final class Ui {
     /** Absolute, resized artwork URL for a Jive icon, local cover path or remote image. */
     static String art(String hostPort, String icon, int size) {
         if (icon == null || icon.length() == 0) return null;
-        String base = "http://" + hostPort;
+        String base = (hostPort.contains("://") ? "" : "http://") + hostPort;
         String sz = size + "x" + size;
         if (icon.startsWith("http://") || icon.startsWith("https://")) {
             if (icon.startsWith(base)) return icon;

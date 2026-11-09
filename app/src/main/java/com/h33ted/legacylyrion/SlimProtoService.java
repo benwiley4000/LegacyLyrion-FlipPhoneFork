@@ -56,6 +56,9 @@ public class SlimProtoService extends Service {
     private volatile int serverHttpPort = 9000;
 
     private volatile Socket socket;
+    private volatile BridgeLink bridge;          // the connection when going through the LyrionJS plugin
+    private volatile boolean useBridge;
+    private volatile String bridgeAddress = "";  // the server with its protocol, e.g. https://music.example.com:9100
     private volatile DataOutputStream outStream;
     private Thread protoThread;
 
@@ -107,9 +110,14 @@ public class SlimProtoService extends Service {
             port = p.getInt("port", 9000);
         }
         if (host != null && host.length() > 0) {
-            boolean changed = !host.equals(serverIp) || port != serverHttpPort;
+            boolean bridgeNow = Prefs.useBridge(this);
+            String addressNow = Prefs.withProtocol(Prefs.hostPort(this));
+            boolean changed = !host.equals(serverIp) || port != serverHttpPort
+                    || bridgeNow != useBridge || !addressNow.equals(bridgeAddress);
             serverIp = host;
             serverHttpPort = port;
+            useBridge = bridgeNow;
+            bridgeAddress = addressNow;
             if (changed || protoThread == null || !protoThread.isAlive()) {
                 startLoop();
             }
@@ -148,19 +156,37 @@ public class SlimProtoService extends Service {
     private void runProtocolLoop(int gen) {
         while (gen == generation) {
             Socket s = null;
+            BridgeLink bl = null;
+            long retryMs = 3500;
             try {
-                broadcastState("CONNECTING TO " + serverIp + ":3483...");
-                s = new Socket();
-                socket = s;
-                s.connect(new InetSocketAddress(serverIp, SLIMPROTO_PORT), 4500);
-                s.setTcpNoDelay(true);
-                s.setKeepAlive(true);
-
-                DataInputStream in = new DataInputStream(s.getInputStream());
-                outStream = new DataOutputStream(s.getOutputStream());
+                DataInputStream in;
+                if (useBridge) {
+                    // through the LyrionJS plugin: SlimProto over a WebSocket on the web port
+                    broadcastState("CONNECTING TO THE LYRIONJS BRIDGE...");
+                    bl = new BridgeLink(bridgeAddress, new BridgeLink.Listener() {
+                        @Override
+                        public void resumed() {
+                            log("bridge: connection resumed");
+                            sendBackgroundStat("STMt", 0);   // tell LMS where we are now
+                        }
+                    });
+                    bridge = bl;
+                    bl.open();
+                    in = new DataInputStream(bl.in());
+                    outStream = new DataOutputStream(bl.out());
+                } else {
+                    broadcastState("CONNECTING TO " + serverIp + ":3483...");
+                    s = new Socket();
+                    socket = s;
+                    s.connect(new InetSocketAddress(Prefs.bareHost(serverIp), SLIMPROTO_PORT), 4500);
+                    s.setTcpNoDelay(true);
+                    s.setKeepAlive(true);
+                    in = new DataInputStream(s.getInputStream());
+                    outStream = new DataOutputStream(s.getOutputStream());
+                }
 
                 sendHeloPacket();
-                broadcastState("SLIMPROTO REGISTERED (" + localMac(this) + ")");
+                broadcastState((useBridge ? "BRIDGE REGISTERED (" : "SLIMPROTO REGISTERED (") + localMac(this) + ")");
 
                 while (gen == generation) {
                     // Server -> client frame: [2-byte length][4-byte opcode][data]; length includes opcode
@@ -175,16 +201,37 @@ public class SlimProtoService extends Service {
                 }
             } catch (Exception e) {
                 log("connection error: " + e);
-                if (gen == generation) broadcastState("SLIMPROTO RECONNECTING...");
+                if (gen == generation) {
+                    int code = e instanceof WsClient.Closed ? ((WsClient.Closed) e).code : 0;
+                    if (e instanceof Auth.Required) {
+                        broadcastState("THE SERVER NEEDS A LOGIN: SET IT UNDER SERVER LOGIN");
+                        retryMs = 15000;
+                    } else if (code == BridgeLink.REPLACED) {
+                        broadcastState("ANOTHER SESSION TOOK THIS PLAYER");
+                        retryMs = 30000;
+                    } else if (code == BridgeLink.DISABLED) {
+                        broadcastState("BROWSER PLAYERS ARE SWITCHED OFF IN THE LYRIONJS SETTINGS");
+                        retryMs = 30000;
+                    } else if (useBridge && String.valueOf(e.getMessage()).startsWith("HTTP 404")) {
+                        broadcastState("THE LYRIONJS PLUGIN WAS NOT FOUND ON THE SERVER");
+                        retryMs = 15000;
+                    } else {
+                        broadcastState(useBridge ? "BRIDGE RECONNECTING..." : "SLIMPROTO RECONNECTING...");
+                    }
+                }
             } finally {
                 try {
                     if (s != null) s.close();
                 } catch (Exception ignored) {}
-                if (gen == generation) outStream = null;
+                if (bl != null) bl.close();
+                if (gen == generation) {
+                    outStream = null;
+                    bridge = null;
+                }
             }
             if (gen != generation) break;
             try {
-                Thread.sleep(3500);
+                Thread.sleep(retryMs);
             } catch (InterruptedException ie) {
                 break;
             }
@@ -195,7 +242,26 @@ public class SlimProtoService extends Service {
      * Per-device player ID. Derived from ANDROID_ID + serial so a reinstall keeps the same
      * player in Lyrion, with the locally-administered bit set so it never collides with real hardware.
      */
-    public static synchronized String localMac(Context c) {
+    public static String localMac(Context c) {
+        String direct = directMac(c);
+        return Prefs.useBridge(c) ? bridgeMac(direct) : direct;
+    }
+
+    /**
+     * The LyrionJS plugin only lets players with its MAC prefix (02:4c:4a) through its WebSocket, so
+     * through the bridge the phone is the same device under that prefix: its own last three bytes.
+     */
+    static String bridgeMac(String direct) {
+        return "02:4c:4a" + direct.substring(8);
+    }
+
+    /** Is this player ID this phone, however it is connected? */
+    static boolean isOwnMac(Context c, String id) {
+        String d = directMac(c);
+        return d.equalsIgnoreCase(id) || bridgeMac(d).equalsIgnoreCase(id);
+    }
+
+    private static synchronized String directMac(Context c) {
         if (sMac != null) return sMac;
         SharedPreferences p = c.getSharedPreferences(Prefs.FILE, Context.MODE_PRIVATE);
         String m = p.getString("player_mac", null);
@@ -448,7 +514,12 @@ public class SlimProtoService extends Service {
         }
         int targetPort = (port > 0) ? port : serverHttpPort;
         String host = (ipFromServer != null) ? ipFromServer : serverIp;
-        final String streamUrl = "http://" + host + ":" + targetPort + path;
+        // Through the bridge LMS streams to the player from the same address as everything else (it proxies
+        // radio too), so the audio needs no port but the web one. An explicit address in the command
+        // is a direct stream from elsewhere and is fetched from there.
+        final boolean viaBridge = useBridge && ipFromServer == null;
+        final String streamBase = Prefs.withProtocol(bridgeAddress);
+        final String streamUrl = viaBridge ? streamBase + path : "http://" + host + ":" + targetPort + path;
 
         stopAndReleaseMediaPlayer();
         startedSent = false;
@@ -464,7 +535,7 @@ public class SlimProtoService extends Service {
             mp.setAudioStreamType(AudioManager.STREAM_MUSIC);
             mp.setWakeMode(getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
             mp.setVolume(currentGain, currentGain);
-            String login = Auth.header(host + ":" + targetPort);
+            String login = Auth.header(viaBridge ? streamBase : host + ":" + targetPort);
             if (login != null) {   // password-protected server: the stream needs the login too
                 java.util.Map<String, String> headers = new java.util.HashMap<String, String>();
                 headers.put("Authorization", login);
@@ -590,7 +661,12 @@ public class SlimProtoService extends Service {
             Socket s = socket;
             if (s != null) s.close();
         } catch (Exception ignored) {}
+        try {
+            BridgeLink b = bridge;
+            if (b != null) b.close();
+        } catch (Exception ignored) {}
         socket = null;
+        bridge = null;
         outStream = null;
     }
 

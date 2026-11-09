@@ -63,7 +63,13 @@ final class Auth {
     }
 
     private static String norm(String hostPort) {
-        return hostPort == null ? "" : hostPort.trim().toLowerCase(java.util.Locale.US);
+        String s = hostPort == null ? "" : hostPort.trim();
+        if (s.contains("://")) {   // "https://host:9100" -> "host:9100", the key requests are looked up by
+            try {
+                s = hostPort(new URL(s));
+            } catch (Exception ignored) {}
+        }
+        return s.toLowerCase(java.util.Locale.US);
     }
 
     /** Loads stored logins once and starts tracking the visible screen (for the login prompt). */

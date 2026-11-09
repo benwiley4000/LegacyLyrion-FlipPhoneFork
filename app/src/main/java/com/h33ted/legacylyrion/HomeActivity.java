@@ -1031,7 +1031,20 @@ public class HomeActivity extends Activity {
         final String oldLook = Skin.look(this);
         for (int i = 0; i < lookKeys.length; i++) if (lookKeys[i].equals(oldLook)) look.setSelection(i);
 
+        TextView linkLabel = Ui.text(this, 14, false, false);
+        linkLabel.setText("Phone player connection");
+        linkLabel.setPadding(0, Ui.dp(this, 12), 0, 0);
+        final String[] linkKeys = {"auto", "direct", "bridge"};
+        final Spinner link = new Spinner(this);
+        ArrayAdapter<String> linkAd = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item,
+                new String[]{"Automatic", "SlimProto (port 3483)", "LyrionJS bridge (web port)"});
+        linkAd.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        link.setAdapter(linkAd);
+        for (int i = 0; i < linkKeys.length; i++) if (linkKeys[i].equals(Prefs.playerLink(this))) link.setSelection(i);
+
         box.addView(phone);
+        box.addView(linkLabel);
+        box.addView(link);
         box.addView(srcLabel);
         box.addView(src);
         box.addView(lookLabel);
@@ -1086,6 +1099,7 @@ public class HomeActivity extends Activity {
                                 .putString("player_id", sel >= 0 && sel < ids.size() ? ids.get(sel) : pid)
                                 .putString("source", SOURCES[Math.max(0, src.getSelectedItemPosition())])
                                 .putBoolean("phone_player", phone.isChecked())
+                                .putString("player_link", linkKeys[Math.max(0, link.getSelectedItemPosition())])
                                 .putString("look", lookKeys[Math.max(0, look.getSelectedItemPosition())])
                                 .putInt("ui_scale", sizes[Math.max(0, size.getSelectedItemPosition())])
                                 .commit();
