@@ -192,7 +192,7 @@ public class HomeActivity extends Activity {
             searchItem = null;
             searchBase = null;
         }
-        searchBox.setHint(isLocal() ? "Search your library" : "What do you want to listen to?");
+        searchBox.setHint(isLocal() ? "🔍 Search your library" : "🔍 What do you want to listen to?");
         Skin.setSubtitle(this, sourceName(source));
     }
 
