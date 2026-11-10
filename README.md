@@ -16,6 +16,7 @@ I want to make a few changes, some destined for contributing to LegacyLyrion ups
   - Some items can't be focused via D-Pad navigation (now playing icon in top bar, menu icon in top bar, some buttons on album page)
   - Occasionally, something prevents interaction with page items (settings view, initial server setup view)
   - Some UI panes like equalizer show up with swipe but no other obvious interaction
+- Add quit option to main menu
 
 #### For just this fork (for now)
 
