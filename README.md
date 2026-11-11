@@ -24,6 +24,7 @@ I want to make a few changes, some destined for contributing to LegacyLyrion ups
 - Support http/https addresses instead of just IP addresses for servers
 - Support targeting LyrionJS plugin backend for audio streaming to avoid the SlimProto port being publicly exposed
 - Save list of prevously contacted servers and their configuration (like username+password, lyrionjs backend vs slim proto) to avoid having to retype information when changing server
+- Notifications that don't thrash notification view
 
 
 # ORIGINAL README
