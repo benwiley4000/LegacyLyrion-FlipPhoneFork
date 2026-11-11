@@ -41,7 +41,7 @@ import java.util.List;
 public class HomeActivity extends Activity {
 
     private static final int MENU_SETTINGS = 1, MENU_NOW = 2, MENU_LIBRARY = 3, MENU_FX = 4, MENU_FIND = 5, MENU_UPDATE = 6,
-            MENU_SOURCE = 7, MENU_LOGIN = 8;
+            MENU_SOURCE = 7, MENU_LOGIN = 8, MENU_QUIT = 9;
 
     private EditText searchBox;
     private LinearLayout content;
@@ -150,12 +150,13 @@ public class HomeActivity extends Activity {
                         Ui.themeColor(this, android.R.attr.actionMenuTextColor, 0xFFFFFFFF), 32))
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
         menu.add(0, MENU_SOURCE, 1, "Music source");
-        menu.add(0, MENU_LIBRARY, 1, "Library browser");
-        menu.add(0, MENU_FX, 2, "Sound effects");
-        menu.add(0, MENU_SETTINGS, 3, "Settings").setIcon(android.R.drawable.ic_menu_preferences);
-        menu.add(0, MENU_FIND, 4, "Find server");
-        menu.add(0, MENU_LOGIN, 4, "Server login");
-        menu.add(0, MENU_UPDATE, 5, "Check for updates");
+        menu.add(0, MENU_LIBRARY, 2, "Library browser");
+        menu.add(0, MENU_FX, 3, "Sound effects");
+        menu.add(0, MENU_SETTINGS, 4, "Settings").setIcon(android.R.drawable.ic_menu_preferences);
+        menu.add(0, MENU_FIND, 5, "Find server");
+        menu.add(0, MENU_LOGIN, 6, "Server login");
+        menu.add(0, MENU_UPDATE, 7, "Check for updates");
+        menu.add(0, MENU_QUIT, 8, "Quit");
         return true;
     }
 
@@ -177,6 +178,10 @@ public class HomeActivity extends Activity {
             case MENU_FX: Nav.soundEffects(this); return true;
             case MENU_FIND: startActivity(new Intent(this, SetupActivity.class)); return true;
             case MENU_UPDATE: Updater.check(this, true); return true;
+            case MENU_QUIT:
+                stopService(new Intent(this, SlimProtoService.class));
+                finishAffinity();
+                return true;
         }
         return super.onOptionsItemSelected(item);
     }

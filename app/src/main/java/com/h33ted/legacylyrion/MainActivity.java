@@ -6,6 +6,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.content.Intent;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
@@ -31,7 +32,7 @@ import java.util.Locale;
 /** Now Playing: big artwork, title, seek, transport, volume; the queue swaps in over the artwork. */
 public class MainActivity extends Activity {
 
-    private static final int M_QUEUE = 1, M_PLAYER = 2, M_FX = 3, M_CLEAR = 4, M_LOG = 5;
+    private static final int M_QUEUE = 1, M_PLAYER = 2, M_FX = 3, M_CLEAR = 4, M_LOG = 5, M_QUIT = 6;
 
     private ImageView cover;
     private ListView queueList;
@@ -359,11 +360,12 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        menu.add(0, M_QUEUE, 0, "Queue").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
-        menu.add(0, M_PLAYER, 1, "Choose player");
-        menu.add(0, M_FX, 2, "Sound effects");
-        menu.add(0, M_CLEAR, 3, "Clear queue");
-        menu.add(0, M_LOG, 4, "Player log");
+        menu.add(0, M_QUEUE, 1, "Queue").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        menu.add(0, M_PLAYER, 2, "Choose player");
+        menu.add(0, M_FX, 3, "Sound effects");
+        menu.add(0, M_CLEAR, 4, "Clear queue");
+        menu.add(0, M_LOG, 5, "Player log");
+        menu.add(0, M_QUIT, 6, "Quit");
         return true;
     }
 
@@ -379,6 +381,10 @@ public class MainActivity extends Activity {
                 queueLoadedFor = -2;
                 return true;
             case M_LOG: showLog(); return true;
+            case M_QUIT:
+                stopService(new Intent(this, SlimProtoService.class));
+                finishAffinity();
+                return true;
         }
         return super.onOptionsItemSelected(item);
     }
