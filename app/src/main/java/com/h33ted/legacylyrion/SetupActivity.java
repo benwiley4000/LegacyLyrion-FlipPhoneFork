@@ -1,8 +1,11 @@
 package com.h33ted.legacylyrion;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.DhcpInfo;
 import android.net.wifi.WifiManager;
 import android.os.AsyncTask;
@@ -17,6 +20,7 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 import org.json.JSONObject;
 
 import java.net.DatagramPacket;
@@ -37,6 +41,9 @@ public class SetupActivity extends Activity {
     private TextView status;
     private EditText host, port;
     private int scanGen = 0;
+    private LinearLayout savedBox;
+    private TextView savedHead;
+    private final List<String> foundKeys = new ArrayList<String>();   // answering now: not listed again under saved servers
 
     static final class Server {
         String name, ip, port, version;
@@ -60,7 +67,7 @@ public class SetupActivity extends Activity {
         TextView expl = Ui.text(this, 14, false, false);
         expl.setSingleLine(false);
         expl.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 12));
-        expl.setText("Looking on this Wi-Fi network. Tap your server, or type its address below.");
+        expl.setText("Looking on this Wi-Fi network. Tap a server found now or saved before, or type an address below.");
         root.addView(expl);
 
         LinearLayout row = new LinearLayout(this);
@@ -85,6 +92,15 @@ public class SetupActivity extends Activity {
         found.setOrientation(LinearLayout.VERTICAL);
         found.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 8));
         root.addView(found);
+
+        savedHead = Ui.text(this, 17, true, true);
+        savedHead.setText("Saved servers");
+        savedHead.setPadding(0, Ui.dp(this, 8), 0, 0);
+        root.addView(savedHead);
+        savedBox = new LinearLayout(this);
+        savedBox.setOrientation(LinearLayout.VERTICAL);
+        savedBox.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 8));
+        root.addView(savedBox);
 
         TextView manual = Ui.text(this, 17, true, true);
         manual.setText("Enter it yourself");
@@ -115,7 +131,7 @@ public class SetupActivity extends Activity {
                     host.setError("Enter the server's address");
                     return;
                 }
-                test(hst, prt.length() == 0 ? "9000" : prt);
+                test(null, hst, prt.length() == 0 ? "9000" : prt);
             }
         });
         root.addView(connect);
@@ -132,6 +148,8 @@ public class SetupActivity extends Activity {
     private void scan() {
         final int gen = ++scanGen;
         found.removeAllViews();
+        foundKeys.clear();
+        refreshSaved();
         spinner.setVisibility(View.VISIBLE);
         status.setText("Searching…");
         final InetAddress bcast = broadcastAddress();
@@ -239,28 +257,100 @@ public class SetupActivity extends Activity {
     }
 
     private void addServer(final Server sv) {
+        foundKeys.add(Auth.addressKey(sv.ip + ":" + sv.port));
+        SharedPreferences sp = Prefs.get(this);
+        Servers.Server saved = Servers.find(Servers.list(sp), sv.ip, sv.port);
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.VERTICAL);
         row.setPadding(Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12));
         Ui.selectable(row);
         TextView name = Ui.text(this, 18, true, true);
-        name.setText(sv.name);
+        name.setText(saved != null ? saved.name : sv.name);
         TextView addr = Ui.text(this, 14, false, false);
         addr.setText(sv.ip + ":" + sv.port + (sv.version != null ? "  •  version " + sv.version : ""));
         row.addView(name);
         row.addView(addr);
+        if (saved != null) {   // a server we know: choosing it brings its settings back
+            TextView known = Ui.text(this, 14, false, false);
+            known.setText("Saved  •  " + Servers.linkText(saved) + (saved.id.equals(Servers.activeId(sp)) ? "  •  in use" : ""));
+            row.addView(known);
+        }
         row.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                test(sv.ip, sv.port);
+                test(sv.name, sv.ip, sv.port);
             }
         });
         found.addView(row);
+        refreshSaved();   // it is no longer listed down there
+    }
+
+    // ------------------------------------------------------------------ saved servers
+
+    /** The saved servers that are not answering on this network right now (those are shown above, with their settings). */
+    private void refreshSaved() {
+        savedBox.removeAllViews();
+        SharedPreferences sp = Prefs.get(this);
+        String active = Servers.activeId(sp);
+        int shown = 0;
+        for (final Servers.Server s : Servers.list(sp)) {
+            if (foundKeys.contains(s.key())) continue;
+            final boolean current = s.id.equals(active);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.VERTICAL);
+            row.setPadding(Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12));
+            Ui.selectable(row);
+            TextView name = Ui.text(this, 18, true, true);
+            name.setText(s.name);
+            TextView addr = Ui.text(this, 14, false, false);
+            addr.setText(Servers.describe(s));
+            TextView how = Ui.text(this, 14, false, false);
+            how.setText(Servers.linkText(s) + (Auth.has(s.address()) ? "  •  login saved" : "") + (current ? "  •  in use" : ""));
+            row.addView(name);
+            row.addView(addr);
+            row.addView(how);
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    test(s.name, s.host, s.port);
+                }
+            });
+            row.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    confirmForget(s, current);
+                    return true;
+                }
+            });
+            savedBox.addView(row);
+            shown++;
+        }
+        savedHead.setVisibility(shown == 0 ? View.GONE : View.VISIBLE);
+    }
+
+    private void confirmForget(final Servers.Server s, boolean current) {
+        if (current) {
+            Toast.makeText(this, "This is the server in use. Choose another one first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Forget " + s.name + "?")
+                .setMessage("Its saved settings and login are removed. You can add it again any time.")
+                .setPositiveButton("Forget", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        Servers.Server gone = Servers.forget(Prefs.get(SetupActivity.this), s.id);
+                        if (gone != null) Auth.save(SetupActivity.this, gone.address(), "", "");
+                        refreshSaved();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     // ------------------------------------------------------------------ connect
 
-    private void test(final String hst, final String prt) {
+    private void test(final String name, final String hst, final String prt) {
         spinner.setVisibility(View.VISIBLE);
         status.setText("Connecting to " + hst + ":" + prt + "…");
         Rpc.call(hst + ":" + prt, "", Rpc.cmd("serverstatus", "0", "0"), new Rpc.Callback() {
@@ -272,7 +362,7 @@ public class SetupActivity extends Activity {
                     Auth.prompt(SetupActivity.this, hst + ":" + prt, (Auth.Required) e, new Runnable() {
                         @Override
                         public void run() {
-                            test(hst, prt);
+                            test(name, hst, prt);
                         }
                     });
                     return;
@@ -282,11 +372,10 @@ public class SetupActivity extends Activity {
                             + (e != null && e.getMessage() != null ? " (" + e.getMessage() + ")" : ""));
                     return;
                 }
-                Prefs.get(SetupActivity.this).edit()
-                        .putString("lms_host", hst)
-                        .putString("lms_port", prt)
-                        .putBoolean("setup_done", true)
-                        .commit();
+                // a saved server comes back with its own settings; a new one starts from the defaults
+                SharedPreferences sp = Prefs.get(SetupActivity.this);
+                Servers.Server known = Servers.find(Servers.list(sp), hst, prt);
+                Servers.activate(sp, known != null ? known : Servers.create(name, hst, prt));
                 startActivity(new Intent(SetupActivity.this, HomeActivity.class)
                         .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
                 finish();

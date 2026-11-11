@@ -22,6 +22,7 @@ final class Prefs {
                         .commit();
             }
         }
+        Servers.install(p);
         return p;
     }
 

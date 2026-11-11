@@ -969,6 +969,11 @@ public class HomeActivity extends Activity {
         int p = Ui.dp(this, 20);
         box.setPadding(p, Ui.dp(this, 8), p, 0);
 
+        final EditText name = Skin.editText(this);
+        name.setHint("Name, for example Home");
+        name.setSingleLine(true);
+        Servers.Server saved = Servers.active(Prefs.get(this));
+        name.setText(saved != null ? saved.name : "");
         final EditText host = Skin.editText(this);
         host.setHint("Server IP address");
         host.setSingleLine(true);
@@ -999,6 +1004,10 @@ public class HomeActivity extends Activity {
         src.setAdapter(srcAd);
         src.setSelection(sourceIndex(Prefs.source(this)));
 
+        TextView serverHead = Ui.text(this, 17, true, true);
+        serverHead.setText("This server");
+        box.addView(serverHead);
+        box.addView(name);
         box.addView(host);
         box.addView(port);
         box.addView(pl);
@@ -1047,6 +1056,10 @@ public class HomeActivity extends Activity {
         box.addView(link);
         box.addView(srcLabel);
         box.addView(src);
+        TextView appHead = Ui.text(this, 17, true, true);
+        appHead.setText("All servers");
+        appHead.setPadding(0, Ui.dp(this, 20), 0, 0);
+        box.addView(appHead);
         box.addView(lookLabel);
         box.addView(look);
         TextView sizeLabel = Ui.text(this, 14, false, false);
@@ -1093,6 +1106,7 @@ public class HomeActivity extends Activity {
                     @Override
                     public void onClick(DialogInterface d, int w) {
                         int sel = players.getSelectedItemPosition();
+                        String oldAddress = Prefs.hostPort(HomeActivity.this);
                         Prefs.get(HomeActivity.this).edit()
                                 .putString("lms_host", host.getText().toString().trim())
                                 .putString("lms_port", port.getText().toString().trim())
@@ -1103,6 +1117,9 @@ public class HomeActivity extends Activity {
                                 .putString("look", lookKeys[Math.max(0, look.getSelectedItemPosition())])
                                 .putInt("ui_scale", sizes[Math.max(0, size.getSelectedItemPosition())])
                                 .commit();
+                        // the saved server follows what was edited; its login follows an edited address
+                        Auth.move(HomeActivity.this, oldAddress, Prefs.hostPort(HomeActivity.this));
+                        Servers.nameActive(Prefs.get(HomeActivity.this), name.getText().toString());
                         if (!oldLook.equals(lookKeys[Math.max(0, look.getSelectedItemPosition())])
                                 || oldSize != sizes[Math.max(0, size.getSelectedItemPosition())]) {
                             recreate();

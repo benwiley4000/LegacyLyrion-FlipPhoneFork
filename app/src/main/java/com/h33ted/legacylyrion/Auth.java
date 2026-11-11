@@ -72,6 +72,28 @@ final class Auth {
         return s.toLowerCase(java.util.Locale.US);
     }
 
+    /** One key per server, however its address was written (host:port, or https://host plus a port). */
+    static String addressKey(String hostPort) {
+        return norm(hostPort);
+    }
+
+    /** Carries a login over to a server's new address, so editing the address doesn't lose it. */
+    static void move(Context c, String fromHostPort, String toHostPort) {
+        move(Prefs.get(c), fromHostPort, toHostPort);
+    }
+
+    static void move(SharedPreferences p, String fromHostPort, String toHostPort) {
+        String from = key(fromHostPort), to = key(toHostPort);
+        if (from.equals(to)) return;
+        String user = p.getString(from + ".user", null), token = p.getString(from + ".token", null);
+        if (user == null || token == null || p.contains(to + ".token")) return;   // nothing to move, or one already there
+        synchronized (Auth.class) {
+            HEADERS.remove(norm(fromHostPort));
+            HEADERS.put(norm(toHostPort), "Basic " + token);
+        }
+        p.edit().remove(from + ".user").remove(from + ".token").putString(to + ".user", user).putString(to + ".token", token).commit();
+    }
+
     /** Loads stored logins once and starts tracking the visible screen (for the login prompt). */
     static synchronized void init(Context c) {
         if (loaded) return;

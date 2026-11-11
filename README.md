@@ -67,6 +67,10 @@ Through the bridge the phone shows up in Lyrion as a separate player (its ID sta
 
 Limits: https needs TLS 1.2, which Android 4.1 to 4.3 have but leave off (the app switches it on) and Android 4.0 does not have, so those phones keep using the plain connection. Phones older than Android 7.1 may not trust certificates from Let's Encrypt, whose root they lack; use a certificate from another authority or install that root on the phone.
 
+### Switching between servers
+
+Each server you connect to is saved, with everything that belongs to it: its address and port, which player is controlled, whether the phone is a player and how it connects, the music source and the login. *Menu > Find server* lists the servers found on the network and the ones you saved; tapping one brings all of its settings back. A saved server that is found on the network is listed once, among the found ones, and still gets its saved settings. A server seen for the first time starts from defaults. Press and hold a saved server to forget it (and its login). The look and size of the app are shared by all servers. *Settings* has the name and settings of the server in use.
+
 ## Building
 
 The project is a plain Gradle project (Android Gradle Plugin 4.2.2, Gradle 6.9, JDK 8, SDK 28, no dependencies).
