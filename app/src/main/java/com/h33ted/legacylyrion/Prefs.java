@@ -109,4 +109,6 @@ final class Prefs {
     }
 
     static boolean localOnly(Context c) { return SRC_LOCAL.equals(source(c)); }
+
+    static boolean notifCompatMode(Context c) { return get(c).getBoolean("notif_compat_mode", false); }
 }

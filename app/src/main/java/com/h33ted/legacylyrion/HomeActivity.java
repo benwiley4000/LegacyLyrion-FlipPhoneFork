@@ -1076,6 +1076,13 @@ public class HomeActivity extends Activity {
         for (int i = 0; i < sizes.length; i++) if (sizes[i] == oldSize) size.setSelection(i);
         box.addView(sizeLabel);
         box.addView(size);
+
+        final CheckBox notifCompatMode = new CheckBox(this);
+        notifCompatMode.setText("Display simpler media notification");
+        notifCompatMode.setChecked(Prefs.notifCompatMode(this));
+        notifCompatMode.setPadding(0, Ui.dp(this, 12), 0, 0);
+        box.addView(notifCompatMode);
+
         ScrollView scrollBox = new ScrollView(this);   // fits small screens
         scrollBox.addView(box);
 
@@ -1116,6 +1123,7 @@ public class HomeActivity extends Activity {
                                 .putString("player_link", linkKeys[Math.max(0, link.getSelectedItemPosition())])
                                 .putString("look", lookKeys[Math.max(0, look.getSelectedItemPosition())])
                                 .putInt("ui_scale", sizes[Math.max(0, size.getSelectedItemPosition())])
+                                .putBoolean("notif_compat_mode", notifCompatMode.isChecked())
                                 .commit();
                         // the saved server follows what was edited; its login follows an edited address
                         Auth.move(HomeActivity.this, oldAddress, Prefs.hostPort(HomeActivity.this));

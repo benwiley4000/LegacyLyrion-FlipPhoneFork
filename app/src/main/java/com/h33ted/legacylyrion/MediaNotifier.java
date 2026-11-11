@@ -154,14 +154,17 @@ final class MediaNotifier {
                 durationMs = (long) (r.optDouble("duration", 0) * 1000);
                 if (playing && (!wasPlaying || System.currentTimeMillis() - lastClaim > 30000)) claimLockScreen();
                 wasPlaying = playing;
+                String newTitle = "";
+                String newArtist = "";
+                String newAlbum = "";
                 if (t == null) {
-                    title = "LegacyLyrion";
-                    artist = r.optString("player_name", "Nothing playing");
-                    album = "";
+                    newTitle = "LegacyLyrion";
+                    newArtist = r.optString("player_name", "Nothing playing");
+                    newAlbum = "";
                 } else {
-                    title = t.optString("title", "");
-                    artist = t.optString("artist", "");
-                    album = t.optString("album", "");
+                    newTitle = t.optString("title", "");
+                    newArtist = t.optString("artist", "");
+                    newAlbum = t.optString("album", "");
                     String icon = Item.str(t, "artwork_url");
                     if (icon == null) icon = Ui.localCover(Item.str(t, "coverid"));
                     if (icon == null) {
@@ -196,6 +199,12 @@ final class MediaNotifier {
                     hasFocus = am.requestAudioFocus(focus, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
                             == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
                 }
+                if (Prefs.notifCompatMode(svc) && title.equals(newTitle) && artist.equals(newArtist) && album.equals(newAlbum)) {
+                    return;
+                }
+                title = newTitle;
+                artist = newArtist;
+                album = newAlbum;
                 publish();
             }
         });
@@ -236,16 +245,22 @@ final class MediaNotifier {
 
     @SuppressWarnings("deprecation")
     private Notification build() {
+        String fallbackText = artist + " - " + title;
         Notification.Builder b = new Notification.Builder(svc)
                 .setSmallIcon(R.drawable.ic_stat_legacylyrion)
-                .setContent(views(R.layout.notif_small))
+                .setContentText(fallbackText)
                 .setOngoing(true)
                 .setWhen(0)
                 .setContentIntent(PendingIntent.getActivity(svc, 0,
                         new Intent(svc, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 0));
+        if (!Prefs.notifCompatMode(svc)) {
+            b = b.setContent(views(R.layout.notif_small));
+        }
         if (Build.VERSION.SDK_INT >= 16) b.setPriority(Notification.PRIORITY_HIGH);
         Notification n = b.getNotification();
-        if (Build.VERSION.SDK_INT >= 16) n.bigContentView = views(R.layout.notif_big);
+        if (Build.VERSION.SDK_INT >= 16 && !Prefs.notifCompatMode(svc)) {
+            n.bigContentView = views(R.layout.notif_big);
+        }
         return n;
     }
 
