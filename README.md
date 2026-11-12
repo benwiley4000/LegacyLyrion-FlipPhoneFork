@@ -17,6 +17,7 @@ I want to make a few changes, some destined for contributing to LegacyLyrion ups
   - Occasionally, something prevents interaction with page items (settings view, initial server setup view)
   - Some UI panes like equalizer show up with swipe but no other obvious interaction
 - Add quit option to main menu
+- Make audio pause during phone call or other interruption
 
 #### For just this fork (for now)
 
