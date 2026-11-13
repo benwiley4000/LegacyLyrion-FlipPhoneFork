@@ -71,6 +71,7 @@ final class Playback {
     private boolean curPrepared, curAuto, curStarted, curDone, curEnded, nextReady;
     private long endedAt;
     private float gain = 1.0f;
+    private boolean muted;
     private final Runnable tickTask = new Runnable() {
         @Override
         public void run() {
@@ -95,7 +96,7 @@ final class Playback {
         host.stat("STMc");
         host.status("SLIMPROTO BUFFERING STREAM...");
         try {
-            final Stream s = host.open(url, login, false, gain);
+            final Stream s = host.open(url, login, false, level());
             cur = s;
             host.later(new Runnable() {
                 @Override
@@ -117,7 +118,7 @@ final class Playback {
         host.log("gapless: fetching the next track while this one plays out: " + url);
         host.stat("STMc");
         try {
-            next = host.open(url, login, true, gain);
+            next = host.open(url, login, true, level());
         } catch (Exception e) {
             host.log("next stream setup failed: " + e);
             host.stat("STMn");
@@ -214,9 +215,27 @@ final class Playback {
 
     void volume(float g) {
         gain = g;
+        applyLevel();
+    }
+
+    /**
+     * Silences the output without touching the server's idea of the volume (or of what is playing): streams
+     * keep running and any that start while muted start silent. {@link ResumeSync} uses it to keep the wrong
+     * track from being heard while it works out what the new server should be playing.
+     */
+    void mute(boolean on) {
+        muted = on;
+        applyLevel();
+    }
+
+    private float level() {
+        return muted ? 0.0f : gain;
+    }
+
+    private void applyLevel() {
         Stream c = cur, n = next;
-        if (c != null) c.setVolume(g);
-        if (n != null) n.setVolume(g);
+        if (c != null) c.setVolume(level());
+        if (n != null) n.setVolume(level());
     }
 
     /** For STAT, from any thread: how far into the current track, 0 when nothing is playing. */

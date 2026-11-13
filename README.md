@@ -71,6 +71,16 @@ Limits: https needs TLS 1.2, which Android 4.1 to 4.3 have but leave off (the ap
 
 Each server you connect to is saved, with everything that belongs to it: its address and port, which player is controlled, whether the phone is a player and how it connects, the music source and the login. *Menu > Find server* lists the servers found on the network and the ones you saved; tapping one brings all of its settings back. A saved server that is found on the network is listed once, among the found ones, and still gets its saved settings. A server seen for the first time starts from defaults. Press and hold a saved server to forget it (and its login). The look and size of the app are shared by all servers. *Settings* has the name and settings of the server in use.
 
+*Find server* has two lists. **Available servers** holds the servers found on the Wi-Fi *and* every saved server that answers from where the phone is now, so a saved address behind a reverse proxy shows up there as soon as you are away from home. **Saved servers not reachable now** holds the rest, which you can still tap to try.
+
+#### When the server goes away
+
+If the server in use stops answering (you left the Wi-Fi, its address stopped working) the app notices, whether the phone connects as a player over SlimProto or over the LyrionJS bridge, and looks through your saved servers. If another one can be reached it offers to go there: a dialog if the app is open, a notification if it is not. Either one leads to *Find server*. While no other server is reachable it keeps looking for a few minutes, since mobile data can take a moment to come up.
+
+#### Carrying the music over
+
+When you pick a server and the player you were controlling is also known to it (it is the same Lyrion server under another address), the app does not start a fresh session. The player of the new server is synced to the old one and, if the old one is gone, the old one then leaves the group, like moving a session between players in Squeezer, so you carry on from the same playlist on a player that stands on its own. If the old player is gone (it was this phone, now connecting another way, and with the bridge the phone is a different player ID than over SlimProto) its current track is restarted at the position it had when the connection was cut. If it is still playing (a speaker you were only controlling) the phone just joins it and stays in its group. If it was paused, the phone is synced and stays paused. The decision is taken as soon as the server is chosen, without waiting for the phone's player to connect, and until it has been carried out the phone's player is muted and the screens wait for the player's status, so the track the new server had queued before is neither heard nor shown.
+
 ## Building
 
 The project is a plain Gradle project (Android Gradle Plugin 4.2.2, Gradle 6.9, JDK 8, SDK 28, no dependencies).

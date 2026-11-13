@@ -84,6 +84,20 @@ public class SlimProtoService extends Service {
         notifier = new MediaNotifier(this, NOTIF_ID);
         startForeground(NOTIF_ID, notifier.initial());
         notifier.start();
+
+        // silent while ResumeSync decides what a newly chosen server should be playing (it may already have begun
+        // before this service was started, so ask as well as listen)
+        ResumeSync.setMuteListener(new ResumeSync.MuteListener() {
+            @Override
+            public void mute(final boolean on) {
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        playback.mute(on);
+                    }
+                });
+            }
+        });
     }
 
     @Override
@@ -121,6 +135,7 @@ public class SlimProtoService extends Service {
 
     @Override
     public void onDestroy() {
+        ResumeSync.setMuteListener(null);
         if (notifier != null) notifier.stop();
         generation++;
         closeSocket();
@@ -179,6 +194,7 @@ public class SlimProtoService extends Service {
                     outStream = new DataOutputStream(s.getOutputStream());
                 }
 
+                ServerWatch.ok(Prefs.hostPort(this));   // the connection is up, so the server is there
                 sendHeloPacket();
                 broadcastState((viaLink ? "BRIDGE REGISTERED (" : "SLIMPROTO REGISTERED (") + localMac(this) + ")");
 
@@ -196,13 +212,17 @@ public class SlimProtoService extends Service {
             } catch (Exception e) {
                 log("connection error: " + e);
                 if (gen == generation) {
+                    boolean network = true;   // the plain socket only ever fails by not connecting or dropping
                     if (pl != null) {
                         PlayerLink.Failure f = pl.failure(e);
                         broadcastState(f.status);
                         retryMs = f.retryMs;
+                        network = f.network;
                     } else {
                         broadcastState("SLIMPROTO RECONNECTING...");
                     }
+                    // lets ServerWatch see a server go away even when no screen is polling it
+                    if (network) ServerWatch.linkFailed(Prefs.hostPort(this));
                 }
             } finally {
                 try {

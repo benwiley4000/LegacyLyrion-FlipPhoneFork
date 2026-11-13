@@ -129,6 +129,7 @@ final class Auth {
                 @Override
                 public void onActivityResumed(Activity a) {
                     current = new WeakReference<Activity>(a);
+                    ServerWatch.onResumed();   // an offer to switch servers made while the app was away
                 }
 
                 @Override
@@ -152,6 +153,12 @@ final class Auth {
                 public void onActivityDestroyed(Activity a) {}
             });
         }
+    }
+
+    /** The screen in front of the user, or null while the app is in the background. */
+    static Activity foreground() {
+        Activity a = current.get();
+        return a == null || a.isFinishing() ? null : a;
     }
 
     static String user(Context c, String hostPort) {

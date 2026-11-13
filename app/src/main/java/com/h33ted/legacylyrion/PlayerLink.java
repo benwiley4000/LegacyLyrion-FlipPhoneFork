@@ -27,10 +27,17 @@ interface PlayerLink {
     final class Failure {
         final String status;
         final long retryMs;
+        /** The connection just failed or dropped, as opposed to the server refusing (a login, a missing plugin...). */
+        final boolean network;
 
         Failure(String status, long retryMs) {
+            this(status, retryMs, false);
+        }
+
+        Failure(String status, long retryMs, boolean network) {
             this.status = status;
             this.retryMs = retryMs;
+            this.network = network;
         }
     }
 }

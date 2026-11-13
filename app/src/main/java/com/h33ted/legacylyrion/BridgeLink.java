@@ -123,7 +123,7 @@ final class BridgeLink implements PlayerLink {
         if (code == REPLACED) return new Failure("ANOTHER SESSION TOOK THIS PLAYER", 30000);
         if (code == DISABLED) return new Failure("BROWSER PLAYERS ARE SWITCHED OFF IN THE LYRIONJS SETTINGS", 30000);
         if (String.valueOf(e.getMessage()).startsWith("HTTP 404")) return new Failure("THE LYRIONJS PLUGIN WAS NOT FOUND ON THE SERVER", 15000);
-        return new Failure("BRIDGE RECONNECTING...", 3500);
+        return new Failure("BRIDGE RECONNECTING...", 3500, true);
     }
 
     /** What LMS sends, as a byte stream. A dropout within the hold is resumed inside read(). */

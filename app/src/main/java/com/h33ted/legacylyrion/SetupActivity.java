@@ -28,22 +28,41 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * First run: finds Lyrion servers on the Wi-Fi with the same UDP discovery Squeezebox hardware
- * uses (port 3483, 'e' request with IPAD/NAME/JSON tags), or takes an address typed by hand.
+ * The find server screen (also the first-run setup). Two lists, so a server that can be used right now is
+ * easy to pick:
+ * <ul>
+ * <li><b>Available servers</b>: the ones found on the Wi-Fi with the same UDP discovery Squeezebox hardware
+ * uses (port 3483, 'e' request with IPAD/NAME/JSON tags), and every saved server that answers when asked
+ * directly, which is how a saved server at another address (the one behind a reverse proxy, say) shows up
+ * while the phone is away from that Wi-Fi.</li>
+ * <li><b>Saved servers not reachable</b>: the rest of the saved servers, still there to tap and try.</li>
+ * </ul>
+ * An address can also be typed by hand. Opened because the server in use went away (see
+ * {@link ServerWatch}), it says so, and whichever server is chosen takes the music over ({@link ResumeSync}).
  */
 public class SetupActivity extends Activity {
+    /** Intent extra: the name of the server that was lost; present when this screen was opened because of that. */
+    static final String EXTRA_LOST = "lost_server";
 
     private LinearLayout found;
+    private TextView foundHead;
     private ProgressBar spinner;
     private TextView status;
     private EditText host, port;
     private int scanGen = 0;
+    private long scanStartedAt;
     private LinearLayout savedBox;
     private TextView savedHead;
-    private final List<String> foundKeys = new ArrayList<String>();   // answering now: not listed again under saved servers
+    private String lostName;
+    private boolean broadcastDone;
+    private int probesLeft;
+    private final List<Server> udp = new ArrayList<Server>();                // found by the broadcast, in the order they answered
+    private final Map<String, Integer> reach = new HashMap<String, Integer>();   // saved servers (by key) that were asked directly: Reach.UP/LOGIN/DOWN
 
     static final class Server {
         String name, ip, port, version;
@@ -67,8 +86,18 @@ public class SetupActivity extends Activity {
         TextView expl = Ui.text(this, 14, false, false);
         expl.setSingleLine(false);
         expl.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 12));
-        expl.setText("Looking on this Wi-Fi network. Tap a server found now or saved before, or type an address below.");
+        expl.setText("Looking on this Wi-Fi network and trying the servers you saved. Tap one that is available, or type an address below.");
         root.addView(expl);
+        lostName = getIntent().getStringExtra(EXTRA_LOST);
+        if (lostName != null) {
+            TextView lost = Ui.text(this, 15, true, true);
+            lost.setSingleLine(false);
+            lost.setTextColor(Ui.accent(this));
+            lost.setPadding(0, 0, 0, Ui.dp(this, 12));
+            lost.setText("Lost connection to " + lostName + ". Choose a server to carry on: if it is the same Lyrion server "
+                    + "under another address, the music picks up where it left off.");
+            root.addView(lost);
+        }
 
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -88,13 +117,18 @@ public class SetupActivity extends Activity {
         row.addView(again);
         root.addView(row);
 
+        foundHead = Ui.text(this, 17, true, true);
+        foundHead.setText("Available servers");
+        foundHead.setPadding(0, Ui.dp(this, 8), 0, 0);
+        foundHead.setVisibility(View.GONE);
+        root.addView(foundHead);
         found = new LinearLayout(this);
         found.setOrientation(LinearLayout.VERTICAL);
         found.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 8));
         root.addView(found);
 
         savedHead = Ui.text(this, 17, true, true);
-        savedHead.setText("Saved servers");
+        savedHead.setText("Saved servers not reachable now");
         savedHead.setPadding(0, Ui.dp(this, 8), 0, 0);
         root.addView(savedHead);
         savedBox = new LinearLayout(this);
@@ -145,13 +179,34 @@ public class SetupActivity extends Activity {
 
     // ------------------------------------------------------------------ discovery
 
+    /** For {@link ServerWatch}: a server may have just become reachable; look again unless this screen only just looked. */
+    void rescanIfIdle() {
+        if (System.currentTimeMillis() - scanStartedAt > 3000) scan();
+    }
+
     private void scan() {
         final int gen = ++scanGen;
-        found.removeAllViews();
-        foundKeys.clear();
-        refreshSaved();
+        scanStartedAt = System.currentTimeMillis();
+        udp.clear();
+        reach.clear();
+        broadcastDone = false;
+        List<Servers.Server> saved = Servers.list(Prefs.get(this));
+        probesLeft = saved.size();
+        render();
         spinner.setVisibility(View.VISIBLE);
         status.setText("Searching…");
+        // the saved servers are asked directly, all at once, alongside the broadcast: a server that is not
+        // on this Wi-Fi never answers the broadcast, but can still be right there at its other address
+        Reach.checkAll(saved, new Reach.Listener() {
+            @Override
+            public void done(Servers.Server server, int result) {
+                if (gen != scanGen) return;
+                reach.put(server.key(), result);
+                probesLeft--;
+                render();
+                finishIfDone();
+            }
+        });
         final InetAddress bcast = broadcastAddress();
         new AsyncTask<Void, Server, Integer>() {
             @Override
@@ -193,17 +248,27 @@ public class SetupActivity extends Activity {
 
             @Override
             protected void onProgressUpdate(Server... list) {
-                if (gen == scanGen) addServer(list[0]);
+                if (gen != scanGen) return;
+                udp.add(list[0]);
+                render();
             }
 
             @Override
             protected void onPostExecute(Integer n) {
                 if (gen != scanGen) return;
-                spinner.setVisibility(View.GONE);
-                status.setText(n == 0 ? "No server answered. Check you're on the same Wi-Fi, or type the address."
-                        : n == 1 ? "Found 1 server" : "Found " + n + " servers");
+                broadcastDone = true;
+                finishIfDone();
             }
         }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    }
+
+    /** Once the broadcast and every saved server have answered (or not): says what was found. */
+    private void finishIfDone() {
+        if (!broadcastDone || probesLeft > 0) return;
+        spinner.setVisibility(View.GONE);
+        int n = found.getChildCount();
+        status.setText(n == 0 ? "No server answered. Check your connection, or type the address."
+                : n == 1 ? "Found 1 server" : "Found " + n + " servers");
     }
 
     private static byte[] request() {
@@ -256,14 +321,49 @@ public class SetupActivity extends Activity {
         }
     }
 
-    private void addServer(final Server sv) {
-        foundKeys.add(Auth.addressKey(sv.ip + ":" + sv.port));
+    /** Draws both lists from what has been found so far. */
+    private void render() {
         SharedPreferences sp = Prefs.get(this);
-        Servers.Server saved = Servers.find(Servers.list(sp), sv.ip, sv.port);
+        String active = Servers.activeId(sp);
+        List<Servers.Server> saved = Servers.list(sp);
+        found.removeAllViews();
+        savedBox.removeAllViews();
+        List<String> listed = new ArrayList<String>();   // keys already on screen: a server is listed once
+        for (Server sv : udp) {
+            listed.add(Auth.addressKey(sv.ip + ":" + sv.port));
+            found.addView(foundRow(sv, Servers.find(saved, sv.ip, sv.port), active));
+        }
+        for (Servers.Server s : saved) {   // a saved server that answers belongs with the found ones, default or not
+            Integer r = reach.get(s.key());
+            if (listed.contains(s.key()) || r == null || r == Reach.DOWN) continue;
+            listed.add(s.key());
+            found.addView(savedRow(s, active, r));
+        }
+        foundHead.setVisibility(found.getChildCount() == 0 ? View.GONE : View.VISIBLE);
+        for (Servers.Server s : saved) {
+            if (listed.contains(s.key())) continue;
+            savedBox.addView(savedRow(s, active, reach.get(s.key())));
+        }
+        savedHead.setText(probesLeft > 0 ? "Saved servers" : "Saved servers not reachable now");   // until they have all been asked
+        savedHead.setVisibility(savedBox.getChildCount() == 0 ? View.GONE : View.VISIBLE);
+    }
+
+    private LinearLayout rowBox() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.VERTICAL);
         row.setPadding(Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12));
         Ui.selectable(row);
+        return row;
+    }
+
+    /** Marks the server in use; "connection lost" if that is why this screen is open and it still does not answer. */
+    private String inUse(boolean answering) {
+        return lostName != null && !answering ? "  •  connection lost" : "  •  in use";
+    }
+
+    /** A server the broadcast found. If it is a saved one too, choosing it brings its settings back. */
+    private View foundRow(final Server sv, Servers.Server saved, String active) {
+        LinearLayout row = rowBox();
         TextView name = Ui.text(this, 18, true, true);
         name.setText(saved != null ? saved.name : sv.name);
         TextView addr = Ui.text(this, 14, false, false);
@@ -272,7 +372,7 @@ public class SetupActivity extends Activity {
         row.addView(addr);
         if (saved != null) {   // a server we know: choosing it brings its settings back
             TextView known = Ui.text(this, 14, false, false);
-            known.setText("Saved  •  " + Servers.linkText(saved) + (saved.id.equals(Servers.activeId(sp)) ? "  •  in use" : ""));
+            known.setText("Saved  •  " + Servers.linkText(saved) + (saved.id.equals(active) ? inUse(true) : ""));
             row.addView(known);
         }
         row.setOnClickListener(new View.OnClickListener() {
@@ -281,51 +381,45 @@ public class SetupActivity extends Activity {
                 test(sv.name, sv.ip, sv.port);
             }
         });
-        found.addView(row);
-        refreshSaved();   // it is no longer listed down there
+        return row;
     }
 
-    // ------------------------------------------------------------------ saved servers
-
-    /** The saved servers that are not answering on this network right now (those are shown above, with their settings). */
-    private void refreshSaved() {
-        savedBox.removeAllViews();
-        SharedPreferences sp = Prefs.get(this);
-        String active = Servers.activeId(sp);
-        int shown = 0;
-        for (final Servers.Server s : Servers.list(sp)) {
-            if (foundKeys.contains(s.key())) continue;
-            final boolean current = s.id.equals(active);
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.VERTICAL);
-            row.setPadding(Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12));
-            Ui.selectable(row);
-            TextView name = Ui.text(this, 18, true, true);
-            name.setText(s.name);
-            TextView addr = Ui.text(this, 14, false, false);
-            addr.setText(Servers.describe(s));
-            TextView how = Ui.text(this, 14, false, false);
-            how.setText(Servers.linkText(s) + (Auth.has(s.address()) ? "  •  login saved" : "") + (current ? "  •  in use" : ""));
-            row.addView(name);
-            row.addView(addr);
-            row.addView(how);
-            row.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    test(s.name, s.host, s.port);
-                }
-            });
-            row.setOnLongClickListener(new View.OnLongClickListener() {
-                @Override
-                public boolean onLongClick(View v) {
-                    confirmForget(s, current);
-                    return true;
-                }
-            });
-            savedBox.addView(row);
-            shown++;
-        }
-        savedHead.setVisibility(shown == 0 ? View.GONE : View.VISIBLE);
+    /**
+     * A saved server. {@code result} is what asking it directly found: Reach.UP or LOGIN (it answers, so it is
+     * listed among the available servers), DOWN (it does not), or null (the question is still out).
+     */
+    private View savedRow(final Servers.Server s, String active, Integer result) {
+        final boolean current = s.id.equals(active);
+        LinearLayout row = rowBox();
+        TextView name = Ui.text(this, 18, true, true);
+        name.setText(s.name);
+        TextView addr = Ui.text(this, 14, false, false);
+        addr.setText(Servers.describe(s));
+        StringBuilder how = new StringBuilder(Servers.linkText(s));
+        if (result != null && result == Reach.LOGIN && !Auth.has(s.address())) how.append("  •  needs a login");
+        else if (Auth.has(s.address())) how.append("  •  login saved");
+        if (result == null) how.append("  •  checking…");
+        else if (result == Reach.DOWN) how.append("  •  not reachable");
+        if (current) how.append(inUse(result != null && result != Reach.DOWN));
+        TextView extra = Ui.text(this, 14, false, false);
+        extra.setText(how.toString());
+        row.addView(name);
+        row.addView(addr);
+        row.addView(extra);
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                test(s.name, s.host, s.port);
+            }
+        });
+        row.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View v) {
+                confirmForget(s, current);
+                return true;
+            }
+        });
+        return row;
     }
 
     private void confirmForget(final Servers.Server s, boolean current) {
@@ -341,7 +435,7 @@ public class SetupActivity extends Activity {
                     public void onClick(DialogInterface d, int w) {
                         Servers.Server gone = Servers.forget(Prefs.get(SetupActivity.this), s.id);
                         if (gone != null) Auth.save(SetupActivity.this, gone.address(), "", "");
-                        refreshSaved();
+                        render();
                     }
                 })
                 .setNegativeButton("Cancel", null)
@@ -351,6 +445,8 @@ public class SetupActivity extends Activity {
     // ------------------------------------------------------------------ connect
 
     private void test(final String name, final String hst, final String prt) {
+        // what the phone is controlling now, and how far along: once the new server's settings are live it is too late to ask
+        final ResumeSync.Handoff leaving = ResumeSync.leaving(this);
         spinner.setVisibility(View.VISIBLE);
         status.setText("Connecting to " + hst + ":" + prt + "…");
         Rpc.call(hst + ":" + prt, "", Rpc.cmd("serverstatus", "0", "0"), new Rpc.Callback() {
@@ -376,6 +472,10 @@ public class SetupActivity extends Activity {
                 SharedPreferences sp = Prefs.get(SetupActivity.this);
                 Servers.Server known = Servers.find(Servers.list(sp), hst, prt);
                 Servers.activate(sp, known != null ? known : Servers.create(name, hst, prt));
+                ServerWatch.reset();   // a lost server is no longer the one in use
+                // if the player we were using is on this server too (the same Lyrion under another address),
+                // the player here is synced to it, so the music carries on from where it was
+                ResumeSync.arrive(SetupActivity.this, leaving);
                 startActivity(new Intent(SetupActivity.this, HomeActivity.class)
                         .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
                 finish();
